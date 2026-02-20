@@ -1,0 +1,25 @@
+{
+  "$schema": "https://railway.app/schema.json",
+  "name": "riftagent",
+  "build": {
+    "builder": "NIXPACKS",
+    "buildCommand": "cd backend && npm install && cd .. && pip install -r requirements.txt",
+    "startCommand": "node backend/server.js"
+  },
+  "deploy": {
+    "numReplicas": 1,
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10
+  },
+  "environments": {
+    "production": {
+      "build": {
+        "env": {
+          "NODE_ENV": "production",
+          "PYTHONPATH": "."
+        }
+      }
+    }
+  }
+}
+

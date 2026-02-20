@@ -1,0 +1,18 @@
+# Rift Agent Dependencies
+
+# Core
+openai>=1.0.0
+PyGithub>=2.0.0
+
+# Testing (optional but recommended)
+pytest>=7.0.0
+pytest-cov>=4.0.0
+
+# Code quality (optional)
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.0.0
+
+# For type hints
+typing-extensions>=4.0.0
+

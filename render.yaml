@@ -1,0 +1,37 @@
+# Render Blueprint Configuration
+# This file defines the services needed to deploy RiftAgent on Render
+# 
+# To deploy:
+# 1. Install Render CLI: npm install -g @render/cli
+# 2. Run: render blueprint render.yaml
+#
+# Or use the Render Dashboard to create services manually.
+
+services:
+  # Backend Web Service (Node.js)
+  - type: web
+    name: riftagent-backend
+    env: node
+    buildCommand: cd backend && npm install && cd .. && pip install -r requirements.txt
+    startCommand: node backend/server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3002"
+      - key: PYTHONPATH
+        value: "."
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+
+  # Frontend Static Site
+  - type: static
+    name: riftagent-frontend
+    buildCommand: cd frontend && npm install && npm run build
+    publishDir: frontend/dist
+    envVars:
+      - key: VITE_API_URL
+        value: https://riftagent-backend.onrender.com
+
