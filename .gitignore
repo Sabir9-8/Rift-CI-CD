@@ -211,3 +211,9 @@ node_modules/
 .DS_Store
 dist/
 build/
+
+# Project-specific ignores
+sabir_debug/
+New Folder/
+.indent_test.py
+.test_error_fiesta.py
