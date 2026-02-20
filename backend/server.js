@@ -13,20 +13,15 @@ const PORT = process.env.PORT || 3002
 const isProduction = process.env.NODE_ENV === 'production'
 
 // Determine frontend build path
-const frontendPath = isProduction 
+const frontendPath = isProduction
   ? path.join(__dirname, 'frontend', 'dist')
   : null
 
-// CORS configuration - allow all origins in development, configure for production
-const corsOptions = isProduction
-  ? {
-      origin: true, // Will be configured based on request in production
-      credentials: true
-    }
-  : {
-      origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
-      credentials: true
-    }
+// CORS configuration - allow all origins (needed for Vercel + Railway cross-origin)
+const corsOptions = {
+  origin: true,
+  credentials: true
+}
 
 app.use(cors(corsOptions))
 app.use(express.json({ limit: '50mb' }))
@@ -35,7 +30,7 @@ app.use(express.json({ limit: '50mb' }))
 if (isProduction && frontendPath && fs.existsSync(frontendPath)) {
   console.log(`Serving frontend from: ${frontendPath}`)
   app.use(express.static(frontendPath))
-  
+
   // Handle SPA routing - serve index.html for all non-API routes
   app.get('*', (req, res) => {
     if (!req.path.startsWith('/api')) {
