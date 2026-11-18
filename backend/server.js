@@ -8,6 +8,25 @@ import fs from 'fs'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
+// Automatically load .env if present (zero-dependency fallback)
+const envPaths = [path.join(__dirname, '.env'), path.join(__dirname, '..', '.env')]
+for (const envPath of envPaths) {
+  if (fs.existsSync(envPath)) {
+    const lines = fs.readFileSync(envPath, 'utf8').split(/\r?\n/)
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
+        const [k, ...v] = trimmed.split('=')
+        const key = k.trim()
+        const val = v.join('=').trim().replace(/^["']|["']$/g, '')
+        if (key && !process.env[key]) {
+          process.env[key] = val
+        }
+      }
+    }
+  }
+}
+
 const app = express()
 const PORT = process.env.PORT || 3002
 const isProduction = process.env.NODE_ENV === 'production'
