@@ -27,14 +27,15 @@ api.interceptors.response.use(
 
 const AgentProvider = ({ children }) => {
   // Token is optional - will use gh CLI if not provided
-  // OpenAI key is optional - will use heuristic fixes if not provided
+  // OpenAI / Gemini key is optional - deterministic AST fixes used if not provided
 
   const [config, setConfig] = useState({
     repoUrl: '',
     teamName: '',
     leaderName: '',
-    token: '',  // Optional - gh CLI will be used if not provided
-    openaiKey: ''  // Optional - heuristic fixes used if not provided
+    token: '',       // Optional
+    openaiKey: '',   // Optional
+    geminiKey: ''    // Optional (Free Google AI Studio key)
   })
 
   const [status, setStatus] = useState('idle')
@@ -48,73 +49,13 @@ const AgentProvider = ({ children }) => {
   const [branchName, setBranchName] = useState('')
   const [cicdRuns, setCicdRuns] = useState([])
 
-  const cicdTimerRef = useRef([])  // array of timer IDs
-
   const updateConfig = useCallback((updates) => {
     setConfig(prev => ({ ...prev, ...updates }))
   }, [])
 
-  /** Sanitise name the same way agent.py does */
+  /** Sanitise name strictly according to RIFT specifications */
   const sanitiseName = (s) =>
     s.trim().toUpperCase().replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, '')
-
-  /** Simulate CI/CD pipeline iterations while agent runs */
-  const startCicdSimulation = useCallback(() => {
-    setCicdRuns([])
-    let iteration = 1
-    const MAX_ITER = 5
-
-    const addRun = (passed) => {
-      setCicdRuns(prev => [
-        ...prev,
-        {
-          id: Date.now() + Math.random(),
-          timestamp: new Date().toLocaleTimeString(),
-          status: passed ? 'passed' : 'failed',
-          iteration,
-          maxIterations: MAX_ITER
-        }
-      ])
-      iteration++
-    }
-
-    // Immediately add first (running) entry
-    setCicdRuns([{
-      id: Date.now(),
-      timestamp: new Date().toLocaleTimeString(),
-      status: 'running',
-      iteration: 1,
-      maxIterations: MAX_ITER
-    }])
-
-    // Simulate intermediate failures then final pass — store ALL timer IDs
-    cicdTimerRef.current = [
-      setTimeout(() => addRun(false), 4000),
-      setTimeout(() => addRun(false), 8000),
-      setTimeout(() => addRun(true), 12000),
-      // Safety: after 90s resolve stuck 'running' badge to failed
-      setTimeout(() => {
-        setCicdRuns(prev =>
-          prev.map(r => r.status === 'running' ? { ...r, status: 'failed' } : r)
-        )
-      }, 90000)
-    ]
-  }, [])
-
-  const stopCicdSimulation = useCallback((passed) => {
-    // Clear every timer (including the 90s safety one)
-    if (Array.isArray(cicdTimerRef.current)) {
-      cicdTimerRef.current.forEach(id => clearTimeout(id))
-    }
-    cicdTimerRef.current = []
-    // Mark any "running" entry as resolved
-    setCicdRuns(prev =>
-      prev.map(r => r.status === 'running'
-        ? { ...r, status: passed ? 'passed' : 'failed' }
-        : r
-      )
-    )
-  }, [])
 
   const runAgent = useCallback(async () => {
     if (!config.repoUrl || !config.teamName || !config.leaderName) {
@@ -124,7 +65,8 @@ const AgentProvider = ({ children }) => {
 
     const t = sanitiseName(config.teamName)
     const l = sanitiseName(config.leaderName)
-    setBranchName(`${t}_${l}_AI_Fix`)
+    const expectedBranch = `${t}_${l}_AI_Fix`
+    setBranchName(expectedBranch)
 
     const now = Date.now()
     setStartTime(now)
@@ -134,39 +76,51 @@ const AgentProvider = ({ children }) => {
     setResults(null)
     setErrors([])
     setCicdRuns([])
-
-    startCicdSimulation()
+    setCurrentStep('Multi-Agent Orchestrator initialized...')
 
     try {
-      setCurrentStep('Initializing agent...')
-
       const response = await api.post('/api/run-agent', {
         repoUrl: config.repoUrl,
         teamName: config.teamName,
         leaderName: config.leaderName,
         token: config.token,
-        openaiKey: config.openaiKey
+        openaiKey: config.openaiKey,
+        geminiKey: config.geminiKey
       })
-
-      const steps = [
-        'Cloning repository...',
-        'Running tests...',
-        'Detecting errors...',
-        'Generating fixes...',
-        'Committing and pushing...',
-        'Creating pull request...'
-      ]
-      for (const step of steps) {
-        setCurrentStep(step)
-        await new Promise(r => setTimeout(r, 1500))
-      }
 
       const finished = Date.now()
       setEndTime(finished)
       setResults(response.data)
-      setErrors(response.data.fixes || [])
+
+      const appliedFixes = response.data.fixes || []
+      setErrors(appliedFixes)
+      if (response.data.branchName) {
+        setBranchName(response.data.branchName)
+      }
+
+      // Populate real CI/CD timeline runs from backend
+      const rawTimeline = response.data.ciCdTimeline || []
+      if (rawTimeline.length > 0) {
+        setCicdRuns(rawTimeline.map((item, idx) => ({
+          id: item.iteration || idx + 1,
+          timestamp: item.timestamp || new Date().toLocaleTimeString(),
+          status: item.status || 'passed',
+          iteration: item.iteration || idx + 1,
+          maxIterations: item.max_iterations || 5
+        })))
+      } else {
+        // Fallback single run if tests succeeded on pass 1
+        setCicdRuns([{
+          id: 1,
+          timestamp: new Date().toLocaleTimeString(),
+          status: response.data.success !== false ? 'passed' : 'failed',
+          iteration: 1,
+          maxIterations: 5
+        }])
+      }
+
       setStatus('success')
-      stopCicdSimulation(response.data.success !== false)
+      setCurrentStep('Analysis and healing completed!')
 
       setHistory(prev => [{
         id: finished,
@@ -175,13 +129,12 @@ const AgentProvider = ({ children }) => {
         errorsDetected: response.data.errorsDetected || 0,
         fixesApplied: response.data.fixesApplied || 0,
         prNumber: response.data.prCreated,
-        status: 'success'
+        status: response.data.success !== false ? 'success' : 'failed'
       }, ...prev])
 
     } catch (err) {
       const finished = Date.now()
       setEndTime(finished)
-      stopCicdSimulation(false)
 
       let errorMessage = 'An error occurred'
       if (err.response) errorMessage = err.response.data?.message || err.message
@@ -201,7 +154,7 @@ const AgentProvider = ({ children }) => {
         status: 'error'
       }, ...prev])
     }
-  }, [config, startCicdSimulation, stopCicdSimulation])
+  }, [config])
 
   const clearResults = useCallback(() => {
     setResults(null)

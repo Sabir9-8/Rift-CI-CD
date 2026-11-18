@@ -1,18 +1,26 @@
 # Rift Agent Dependencies
 
-# Core
-openai>=1.0.0
-PyGithub>=2.0.0
+# Multi-Agent Architecture
+langgraph>=0.0.20
+langchain-core>=0.1.0
 
-# Testing (optional but recommended)
+# LLM Providers (OpenAI & Free Google Gemini)
+openai>=1.0.0
+google-generativeai>=0.3.0
+
+# GitHub Integration
+PyGithub>=2.0.0
+requests>=2.28.0
+
+# Testing (Test Runner & Discovery)
 pytest>=7.0.0
 pytest-cov>=4.0.0
 
-# Code quality (optional)
-black>=23.0.0
+# Code Quality & Static Analysis
+ruff>=0.1.0
 flake8>=6.0.0
 mypy>=1.0.0
 
-# For type hints
+# Utilities & Type Hints
 typing-extensions>=4.0.0
 

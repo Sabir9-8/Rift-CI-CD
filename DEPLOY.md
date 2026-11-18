@@ -1,48 +1,58 @@
 # RiftAgent Deployment Configuration
 
 ## Overview
-This is a full-stack application (React frontend + Express.js backend + Python agent).
+This is a full-stack application (React 19 frontend + Express.js backend + LangGraph Python agent).
+
+---
 
 ## Deployment Options
 
-### Option 1: Render (Recommended)
-Render provides easy deployment for both Node.js and Python services.
+### Option 1: Vercel (Frontend) + Railway / Render (Backend) [Recommended]
 
-1. **Create a Render account** at https://render.com
-2. **Deploy Backend + Python Agent**:
-   - Create a new Web Service
-   - Connect your GitHub repository
-   - Build Command: `pip install -r requirements.txt`
-   - Start Command: `node backend/server.js`
-   - Add environment variables:
-     - `PORT`: 3002
-     - `PYTHONPATH`: .
-     - `GITHUB_TOKEN`: (your GitHub token for creating PRs)
-     - `OPENAI_API_KEY`: (optional, for AI-powered fixes)
+This is the cleanest and most scalable architecture:
 
-3. **Deploy Frontend**:
-   - Create a new Static Site
-   - Connect the same repository
-   - Build Command: `cd frontend && npm install && npm run build`
-   - Publish Directory: `frontend/dist`
+#### Step 1: Deploy Backend (Railway or Render)
+1. **Create project on [Railway](https://railway.app) or [Render](https://render.com)**.
+2. **Connect repository**: `https://github.com/Sabir9-8/Rift-CI-CD`.
+3. **Build using Dockerfile**: Railway auto-detects `Dockerfile` in the root.
+4. **Environment Variables**:
+   * `PORT`: `3002`
+   * `GITHUB_TOKEN`: (Optional GitHub PAT)
+   * `GEMINI_API_KEY`: (Optional free Google AI Studio key)
+   * `OPENAI_API_KEY`: (Optional OpenAI key)
+5. Copy your live backend service URL (e.g. `https://rift-backend-production.up.railway.app`).
 
-### Option 2: Railway
-Railway supports both Node.js and Python through Dockerfile-based deployment.
+#### Step 2: Deploy Frontend on Vercel
+1. **Import repository on [Vercel](https://vercel.com)**.
+2. Vercel automatically detects `vercel.json` and Vite.
+3. In **Environment Variables**, add:
+   * **`VITE_API_URL`**: `https://your-backend-url.up.railway.app` (the URL from Step 1)
+4. Click **Deploy**. Your React dashboard will be live at `https://your-app.vercel.app`!
 
-1. **Create a Railway project** at https://railway.app
-2. **Deploy using Dockerfile** (see Dockerfile in this repo)
-3. Set environment variables in Railway dashboard
+---
 
-### Option 3: Docker (Any cloud)
-Build and run the Docker container locally or deploy to any cloud provider.
-
+### Option 2: All-in-One Docker Deployment
+Deploy both backend and pre-built frontend in a single container:
 ```bash
-# Build
+# Build container
 docker build -t riftagent .
 
-# Run
-docker run -p 3002:3002 -e GITHUB_TOKEN=xxx -e OPENAI_API_KEY=xxx riftagent
+# Run container
+docker run -p 3002:3002 -e GITHUB_TOKEN=xxx -e GEMINI_API_KEY=xxx riftagent
 ```
+Open `http://localhost:3002` in your browser.
+
+---
+
+### Option 3: Render Web Service & Static Site
+1. **Backend Web Service**:
+   * Build Command: `cd backend && npm install && cd .. && pip install -r requirements.txt`
+   * Start Command: `node backend/server.js`
+   * Port: `3002`
+2. **Frontend Static Site**:
+   * Build Command: `cd frontend && npm install && npm run build`
+   * Publish Directory: `frontend/dist`
+   * Environment Variable: `VITE_API_URL=https://<your-backend-service>.onrender.com`
 
 ## Environment Variables
 

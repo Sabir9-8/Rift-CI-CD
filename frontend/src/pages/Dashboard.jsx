@@ -99,18 +99,19 @@ const RunSummaryCard = ({ config, results, branchName, startTime, endTime, cicdP
 
 /** ② Score Breakdown Panel */
 const ScorePanel = ({ results, startTime, endTime }) => {
-  const elapsed = endTime && startTime ? (endTime - startTime) / 60000 : 0
-  const fixCount = results?.fixesApplied ?? 0
-  const speedBonus = elapsed < 5 ? 10 : 0
-  const overCommits = Math.max(0, fixCount - 20)
-  const penalty = overCommits * 2
-  const final = Math.max(0, 100 + speedBonus - penalty)
+  const backendScore = results?.score
+  const elapsed = results?.totalTimeSeconds ? results.totalTimeSeconds / 60 : (endTime && startTime ? (endTime - startTime) / 60000 : 0)
+
+  const baseScore = backendScore?.base_score ?? 100
+  const speedBonus = backendScore?.speed_bonus ?? (elapsed < 5 && results?.success !== false ? 10 : 0)
+  const penalty = backendScore?.efficiency_penalty ?? 0
+  const final = backendScore?.final_score ?? Math.max(0, baseScore + speedBonus - penalty)
   const pct = Math.min(100, (final / 110) * 100)
 
   const items = [
-    { icon: <Target size={16} />, label: 'Base Score', value: '+100', color: '#58a6ff' },
+    { icon: <Target size={16} />, label: 'Base Score', value: `+${baseScore}`, color: '#58a6ff' },
     { icon: <Zap size={16} />, label: `Speed Bonus (${elapsed.toFixed(1)}m)`, value: `+${speedBonus}`, color: speedBonus > 0 ? '#22c55e' : '#8b949e' },
-    { icon: <TrendingUp size={16} />, label: `Efficiency Penalty (${fixCount} commits)`, value: penalty > 0 ? `-${penalty}` : '0', color: penalty > 0 ? '#f85149' : '#22c55e' },
+    { icon: <TrendingUp size={16} />, label: `Efficiency Penalty`, value: penalty > 0 ? `-${penalty}` : '0', color: penalty > 0 ? '#f85149' : '#22c55e' },
   ]
 
   return (
@@ -214,7 +215,7 @@ const FixesTable = ({ errors }) => {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
           <thead>
             <tr style={{ background: 'rgba(0,0,0,0.4)' }}>
-              {['File', 'Bug Type', 'Line', 'Commit Message', 'Status'].map(h => (
+              {['File', 'Bug Type', 'Line Number', 'Commit Message', 'Status'].map(h => (
                 <th key={h} style={{
                   padding: '10px 14px', textAlign: 'left', fontWeight: 600,
                   color: '#8b949e', whiteSpace: 'nowrap',
@@ -226,50 +227,59 @@ const FixesTable = ({ errors }) => {
           <tbody>
             {errors.map((err, idx) => {
               const type = (err.bug_type || 'LOGIC').toUpperCase()
-              const fixed = err.status !== 'FAILED' // treat any non-FAILED as fixed
-              const commit = `AI-FIX: ${type} at line ${err.line || '?'}`
+              const fixed = err.status === 'Fixed' || err.status === 'APPLIED' || err.status !== 'Failed'
+              const lineNo = err.line || err.line_number || '—'
+              const commit = err.commit_message || `[AI-AGENT] Fix ${type} in ${err.file}:${lineNo}`
+              const exactMatch = err.expected_dashboard_output || `${type} error in ${err.file} line ${lineNo} → Fix: ${err.fix || 'resolve error'}`
+
               return (
-                <tr
-                  key={idx}
-                  style={{
-                    background: idx % 2 === 0 ? 'rgba(0,0,0,0.15)' : 'transparent',
-                    borderBottom: '1px solid rgba(255,255,255,0.04)',
-                    transition: 'background 0.15s'
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.background = 'rgba(59,130,246,0.07)'}
-                  onMouseLeave={e => e.currentTarget.style.background = idx % 2 === 0 ? 'rgba(0,0,0,0.15)' : 'transparent'}
-                >
-                  <td style={{ padding: '10px 14px', color: '#e6edf3', fontFamily: 'monospace', fontSize: '0.75rem', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {err.file || '—'}
-                  </td>
-                  <td style={{ padding: '10px 14px' }}>
-                    <span style={{
-                      background: `${bugColor(type)}22`,
-                      border: `1px solid ${bugColor(type)}66`,
-                      color: bugColor(type),
-                      borderRadius: 6, padding: '2px 8px',
-                      fontWeight: 600, fontSize: '0.72rem', letterSpacing: '0.04em'
-                    }}>
-                      {type}
-                    </span>
-                  </td>
-                  <td style={{ padding: '10px 14px', color: '#8b949e', fontFamily: 'monospace' }}>
-                    {err.line || '—'}
-                  </td>
-                  <td style={{ padding: '10px 14px', color: '#c9d1d9', fontFamily: 'monospace', fontSize: '0.72rem', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {commit}
-                  </td>
-                  <td style={{ padding: '10px 14px' }}>
-                    <span style={{
-                      display: 'inline-flex', alignItems: 'center', gap: 5,
-                      fontWeight: 700, fontSize: '0.78rem',
-                      color: fixed ? '#22c55e' : '#f85149'
-                    }}>
-                      {fixed ? <CheckCircle size={13} /> : <XCircle size={13} />}
-                      {fixed ? 'Fixed' : 'Failed'}
-                    </span>
-                  </td>
-                </tr>
+                <React.Fragment key={idx}>
+                  <tr
+                    style={{
+                      background: idx % 2 === 0 ? 'rgba(0,0,0,0.15)' : 'transparent',
+                      borderBottom: '1px solid rgba(255,255,255,0.04)',
+                      transition: 'background 0.15s'
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(59,130,246,0.07)'}
+                    onMouseLeave={e => e.currentTarget.style.background = idx % 2 === 0 ? 'rgba(0,0,0,0.15)' : 'transparent'}
+                  >
+                    <td style={{ padding: '10px 14px', color: '#e6edf3', fontFamily: 'monospace', fontSize: '0.75rem', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {err.file || '—'}
+                    </td>
+                    <td style={{ padding: '10px 14px' }}>
+                      <span style={{
+                        background: `${bugColor(type)}22`,
+                        border: `1px solid ${bugColor(type)}66`,
+                        color: bugColor(type),
+                        borderRadius: 6, padding: '2px 8px',
+                        fontWeight: 600, fontSize: '0.72rem', letterSpacing: '0.04em'
+                      }}>
+                        {type}
+                      </span>
+                    </td>
+                    <td style={{ padding: '10px 14px', color: '#8b949e', fontFamily: 'monospace' }}>
+                      {lineNo}
+                    </td>
+                    <td style={{ padding: '10px 14px', color: '#c9d1d9', fontFamily: 'monospace', fontSize: '0.72rem', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {commit}
+                    </td>
+                    <td style={{ padding: '10px 14px' }}>
+                      <span style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 5,
+                        fontWeight: 700, fontSize: '0.78rem',
+                        color: fixed ? '#22c55e' : '#f85149'
+                      }}>
+                        {fixed ? <CheckCircle size={13} /> : <XCircle size={13} />}
+                        {fixed ? 'Fixed' : 'Failed'}
+                      </span>
+                    </td>
+                  </tr>
+                  <tr style={{ background: 'rgba(0,0,0,0.22)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                    <td colSpan={5} style={{ padding: '6px 14px', fontSize: '0.72rem', color: '#58a6ff', fontFamily: 'monospace' }}>
+                      <span style={{ color: '#8b949e' }}>↳ Output Match: </span>{exactMatch}
+                    </td>
+                  </tr>
+                </React.Fragment>
               )
             })}
           </tbody>
@@ -443,6 +453,36 @@ const Dashboard = () => {
                 placeholder="JOHN"
                 value={config.leaderName}
                 onChange={e => updateConfig({ leaderName: e.target.value })}
+                disabled={status === 'running'}
+              />
+            </div>
+          </div>
+
+          <div className="form-row" style={{ marginTop: '0.75rem' }}>
+            <div className="form-group">
+              <label style={{ fontSize: '0.75rem', color: '#8b949e' }}>GitHub Token (Optional)</label>
+              <input
+                type="password"
+                placeholder="ghp_... (or rely on gh CLI)"
+                value={config.token || ''}
+                onChange={e => updateConfig({ token: e.target.value })}
+                disabled={status === 'running'}
+              />
+            </div>
+            <div className="form-group">
+              <label style={{ fontSize: '0.75rem', color: '#8b949e' }}>AI Key (Optional: Gemini / OpenAI)</label>
+              <input
+                type="password"
+                placeholder="Free Gemini or OpenAI key"
+                value={config.geminiKey || config.openaiKey || ''}
+                onChange={e => {
+                  const val = e.target.value
+                  if (val.startsWith('AIza')) {
+                    updateConfig({ geminiKey: val, openaiKey: '' })
+                  } else {
+                    updateConfig({ openaiKey: val, geminiKey: '' })
+                  }
+                }}
                 disabled={status === 'running'}
               />
             </div>

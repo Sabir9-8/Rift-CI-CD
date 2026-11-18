@@ -12,9 +12,11 @@ const app = express()
 const PORT = process.env.PORT || 3002
 const isProduction = process.env.NODE_ENV === 'production'
 
-// Determine frontend build path
+// Determine frontend build path across different deployment structures
+const candidate1 = path.join(__dirname, 'frontend', 'dist')
+const candidate2 = path.join(__dirname, '..', 'frontend', 'dist')
 const frontendPath = isProduction
-  ? path.join(__dirname, 'frontend', 'dist')
+  ? (fs.existsSync(candidate1) ? candidate1 : (fs.existsSync(candidate2) ? candidate2 : null))
   : null
 
 // CORS configuration - allow all origins (needed for Vercel + Railway cross-origin)
@@ -55,7 +57,7 @@ app.get('/api/health', (req, res) => {
 
 // Run Agent
 app.post('/api/run-agent', (req, res) => {
-  const { repoUrl, teamName, leaderName, token, openaiKey } = req.body
+  const { repoUrl, teamName, leaderName, token, openaiKey, geminiKey } = req.body
 
   // Token is now optional if gh CLI is available
   if (!repoUrl || !teamName || !leaderName) {
@@ -93,6 +95,7 @@ app.post('/api/run-agent', (req, res) => {
       leaderName,
       token: token || '',
       openaiKey: openaiKey || '',
+      geminiKey: geminiKey || '',
       retryLimit: req.body.retryLimit || 5
     }
 
@@ -105,7 +108,8 @@ app.post('/api/run-agent', (req, res) => {
       LANG: process.env.LANG || 'en_US.UTF-8',
       PYTHONPATH: riftPath,
       ...(token ? { GITHUB_TOKEN: token } : {}),
-      ...(openaiKey ? { OPENAI_API_KEY: openaiKey } : {})
+      ...(openaiKey ? { OPENAI_API_KEY: openaiKey } : {}),
+      ...(geminiKey ? { GEMINI_API_KEY: geminiKey } : {})
     }
 
     // Spawn secure rift.cli entrypoint with STDIN JSON payload
