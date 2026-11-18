@@ -8,6 +8,7 @@ import json
 import logging
 import subprocess
 import shutil
+import tempfile
 import ast as ast_module
 import itertools
 from pathlib import Path
@@ -95,9 +96,9 @@ class RiftAgent:
         repo_url: str,
         team_name: str,
         leader_name: str,
-        token: str,
+        token: str = "",
         openai_api_key: Optional[str] = None,
-        clone_dir: str = "/tmp/repo_clone",
+        clone_dir: Optional[str] = None,
         max_fixes: int = 50,
     ):
         self.repo_url = repo_url
@@ -106,7 +107,10 @@ class RiftAgent:
         self.leader_name = re.sub(r'[^A-Z0-9_]', '', re.sub(r'\s+', '_', leader_name.strip().upper()))
         self.token = token
         self.branch_name = f"{self.team_name}_{self.leader_name}_AI_Fix"
-        self.clone_dir = Path(clone_dir)
+        if clone_dir:
+            self.clone_dir = Path(clone_dir)
+        else:
+            self.clone_dir = Path(tempfile.mkdtemp(prefix="rift_repo_"))
         self.max_fixes = max_fixes
         self.openai_api_key = openai_api_key or os.environ.get("OPENAI_API_KEY")
         
@@ -158,10 +162,11 @@ class RiftAgent:
         Uses gh CLI if available when no token is provided."""
         from rift.utils import fork_repo, check_gh_available, check_gh_authenticated
         
-        # Clean previous runs
+        # Clean previous runs safely
         if self.clone_dir.exists():
             logger.info(f"Cleaning previous clone directory: {self.clone_dir}")
-            self._run_command(["rm", "-rf", str(self.clone_dir)], check=False)
+            shutil.rmtree(self.clone_dir, ignore_errors=True)
+        self.clone_dir.mkdir(parents=True, exist_ok=True)
 
         # Determine the clone URL - try to fork if we don't have write access
         clone_url = self.repo_url
@@ -208,8 +213,9 @@ class RiftAgent:
                 clone_url
             )
 
-        # Clone the repository
-        logger.info(f"Cloning repository: {clone_url}")
+        # Clone the repository (scrub secret token from log output)
+        safe_log_url = re.sub(r'https://[^@]+@github\.com', 'https://***@github.com', clone_url)
+        logger.info(f"Cloning repository: {safe_log_url}")
         clone_result = self._run_command(
             ["git", "clone", "--depth=1", clone_url, str(self.clone_dir)],
             check=False
@@ -217,9 +223,10 @@ class RiftAgent:
 
         # Validate clone actually succeeded
         if not self.clone_dir.exists() or not any(self.clone_dir.iterdir()):
+            raw_err = getattr(clone_result, 'stderr', '') or ''
+            safe_err = re.sub(r'https://[^@]+@github\.com', 'https://***@github.com', raw_err)[:300]
             raise RuntimeError(
-                f"Git clone failed (returncode={clone_result.returncode}). "
-                f"stderr: {getattr(clone_result, 'stderr', '')[:300]}"
+                f"Git clone failed (returncode={clone_result.returncode}). stderr: {safe_err}"
             )
 
         self.clone_path = self.clone_dir
