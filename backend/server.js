@@ -104,7 +104,10 @@ app.post('/api/run-agent', (req, res) => {
   }
 
   try {
-    const riftPath = path.join(__dirname, '..')
+    // Detect whether rift is in __dirname (Docker root) or in parent dir (local backend/)
+    const riftPath = fs.existsSync(path.join(__dirname, 'rift'))
+      ? __dirname
+      : path.join(__dirname, '..')
     // Automatically detect python command or use PYTHON_BIN env variable
     const pythonBin = process.env.PYTHON_BIN || (process.platform === 'win32' ? 'python' : 'python3')
 

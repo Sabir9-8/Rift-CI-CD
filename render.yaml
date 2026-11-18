@@ -25,6 +25,8 @@ services:
         sync: false
       - key: OPENAI_API_KEY
         sync: false
+      - key: GEMINI_API_KEY
+        sync: false
 
   # Frontend Static Site
   - type: static
