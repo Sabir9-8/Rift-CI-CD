@@ -87,8 +87,9 @@ def main():
     repo_url = payload.get("repoUrl") or payload.get("repo_url")
     team_name = payload.get("teamName") or payload.get("team_name")
     leader_name = payload.get("leaderName") or payload.get("leader_name")
-    token = payload.get("token") or ""
-    openai_key = payload.get("openaiKey") or payload.get("openai_api_key") or ""
+    token = payload.get("token") or os.environ.get("GITHUB_TOKEN", "")
+    openai_key = payload.get("openaiKey") or payload.get("openai_api_key") or os.environ.get("OPENAI_API_KEY", "")
+    gemini_key = payload.get("geminiKey") or payload.get("gemini_api_key") or os.environ.get("GEMINI_API_KEY", "")
     retry_limit = int(payload.get("retryLimit") or payload.get("retry_limit") or 5)
 
     if not repo_url or not team_name or not leader_name:
@@ -101,6 +102,8 @@ def main():
         os.environ["GITHUB_TOKEN"] = token
     if openai_key:
         os.environ["OPENAI_API_KEY"] = openai_key
+    if gemini_key:
+        os.environ["GEMINI_API_KEY"] = gemini_key
 
     logger.info(f"Starting Multi-Agent Healing Graph for repository: {repo_url}")
     logger.info(f"Team: {team_name}, Leader: {leader_name}, Retry Limit: {retry_limit}")
@@ -115,7 +118,7 @@ def main():
         "leader_name": leader_name,
         "token": token,
         "openai_key": openai_key,
-        "gemini_key": payload.get("geminiKey") or payload.get("gemini_api_key") or os.environ.get("GEMINI_API_KEY", ""),
+        "gemini_key": gemini_key,
         "clone_path": "",
         "max_iterations": retry_limit,
         "current_iteration": 0,

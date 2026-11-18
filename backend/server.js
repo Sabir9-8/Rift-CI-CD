@@ -111,13 +111,17 @@ app.post('/api/run-agent', (req, res) => {
     // Automatically detect python command or use PYTHON_BIN env variable
     const pythonBin = process.env.PYTHON_BIN || (process.platform === 'win32' ? 'python' : 'python3')
 
+    const resolvedToken = token || process.env.GITHUB_TOKEN || ''
+    const resolvedOpenaiKey = openaiKey || process.env.OPENAI_API_KEY || ''
+    const resolvedGeminiKey = geminiKey || process.env.GEMINI_API_KEY || ''
+
     const payload = {
       repoUrl,
       teamName,
       leaderName,
-      token: token || '',
-      openaiKey: openaiKey || '',
-      geminiKey: geminiKey || '',
+      token: resolvedToken,
+      openaiKey: resolvedOpenaiKey,
+      geminiKey: resolvedGeminiKey,
       retryLimit: req.body.retryLimit || 5
     }
 
@@ -129,9 +133,9 @@ app.post('/api/run-agent', (req, res) => {
       TMPDIR: process.env.TMPDIR || '/tmp',
       LANG: process.env.LANG || 'en_US.UTF-8',
       PYTHONPATH: riftPath,
-      ...(token ? { GITHUB_TOKEN: token } : {}),
-      ...(openaiKey ? { OPENAI_API_KEY: openaiKey } : {}),
-      ...(geminiKey ? { GEMINI_API_KEY: geminiKey } : {})
+      ...(resolvedToken ? { GITHUB_TOKEN: resolvedToken } : {}),
+      ...(resolvedOpenaiKey ? { OPENAI_API_KEY: resolvedOpenaiKey } : {}),
+      ...(resolvedGeminiKey ? { GEMINI_API_KEY: resolvedGeminiKey } : {})
     }
 
     // Spawn secure rift.cli entrypoint with STDIN JSON payload
@@ -188,15 +192,22 @@ app.post('/api/run-agent', (req, res) => {
       if (resultMatch) {
         try {
           const result = JSON.parse(resultMatch[1])
+          const prNumber = result.pr_created ?? result.pull_request_number ?? null
+          const isSuccess = result.success ?? (result.final_status === 'PASSED')
+          const errorsCount = result.errors_detected ?? result.total_failures_detected ?? 0
+          const fixesCount = result.fixes_applied ?? result.total_fixes_applied ?? 0
+          const scoreData = result.score || result.score_breakdown || null
+
           return res.json({
-            success: result.success,
-            errorsDetected: result.errors_detected,
-            fixesApplied: result.fixes_applied,
-            prCreated: result.pr_created,
+            success: isSuccess,
+            errorsDetected: errorsCount,
+            fixesApplied: fixesCount,
+            prCreated: prNumber,
+            pullRequestNumber: prNumber,
             error: result.error,
             fixes: result.fixes || [],
             branchName: result.branch_name,
-            score: result.score || null,
+            score: scoreData,
             ciCdTimeline: result.ci_cd_timeline || [],
             totalTimeSeconds: result.total_time_seconds || null,
             rawResult: result

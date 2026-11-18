@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  Play, CheckCircle, XCircle, Clock, GitBranch, FileCode,
+  Play, CheckCircle, XCircle, Clock, GitBranch, GitPullRequest, FileCode,
   Sparkles, RefreshCw, ExternalLink, AlertCircle, Trophy,
   Zap, Target, TrendingUp, Activity, Link, Users, Timer,
   ShieldCheck, ShieldX, BarChart2
@@ -33,13 +33,15 @@ const bugColor = (type) => BUG_COLORS[(type || '').toUpperCase()] || '#94a3b8'
 /** ① Run Summary Card */
 const RunSummaryCard = ({ config, results, branchName, startTime, endTime, cicdPassed }) => {
   const elapsed = endTime && startTime ? endTime - startTime : null
+  const prNum = results?.prCreated || results?.pullRequestNumber || results?.pull_request_number || results?.pr_created
 
   const rows = [
     { icon: <Link size={15} />, label: 'Repository URL', value: config.repoUrl || '—' },
     { icon: <Users size={15} />, label: 'Team / Leader', value: config.teamName && config.leaderName ? `${config.teamName} / ${config.leaderName}` : '—' },
     { icon: <GitBranch size={15} />, label: 'Branch Created', value: branchName || '—' },
-    { icon: <AlertCircle size={15} />, label: 'Failures Detected', value: results?.errorsDetected ?? '—' },
-    { icon: <Sparkles size={15} />, label: 'Fixes Applied', value: results?.fixesApplied ?? '—' },
+    { icon: <GitPullRequest size={15} />, label: 'Pull Request', value: prNum ? `#${prNum}` : '—' },
+    { icon: <AlertCircle size={15} />, label: 'Failures Detected', value: results?.errorsDetected ?? results?.total_failures_detected ?? '—' },
+    { icon: <Sparkles size={15} />, label: 'Fixes Applied', value: results?.fixesApplied ?? results?.total_fixes_applied ?? '—' },
     { icon: <Timer size={15} />, label: 'Time Taken', value: fmtElapsed(elapsed) },
   ]
 
@@ -597,13 +599,37 @@ const Dashboard = () => {
                 <CicdTimeline cicdRuns={cicdRuns} />
 
                 {/* PR link */}
-                {results.prCreated && (
-                  <div style={{ textAlign: 'center', marginTop: '0.5rem' }}>
-                    <a href="#" style={{ color: 'var(--primary-light)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.9rem' }}>
-                      <ExternalLink size={15} /> View Pull Request #{results.prCreated}
-                    </a>
-                  </div>
-                )}
+                {(results?.prCreated || results?.pullRequestNumber || results?.pull_request_number || results?.pr_created) && (() => {
+                  const prNum = results.prCreated || results.pullRequestNumber || results.pull_request_number || results.pr_created
+                  const repoBase = (config.repoUrl || results.repository_url || '').replace(/\.git$/, '')
+                  const prUrl = repoBase.startsWith('http') ? `${repoBase}/pull/${prNum}` : `https://github.com/${repoBase}/pull/${prNum}`
+                  return (
+                    <div style={{ textAlign: 'center', marginTop: '1.25rem', marginBottom: '0.5rem' }}>
+                      <a
+                        href={prUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          background: 'rgba(34, 197, 94, 0.15)',
+                          border: '1px solid #22c55e',
+                          color: '#4ade80',
+                          padding: '10px 22px',
+                          borderRadius: 8,
+                          textDecoration: 'none',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          fontSize: '0.92rem',
+                          fontWeight: 600,
+                          boxShadow: '0 4px 12px rgba(34, 197, 94, 0.15)',
+                          transition: 'all 0.2s ease'
+                        }}
+                      >
+                        <ExternalLink size={16} /> View Pull Request #{prNum} on GitHub
+                      </a>
+                    </div>
+                  )
+                })()}
               </div>
             )}
 

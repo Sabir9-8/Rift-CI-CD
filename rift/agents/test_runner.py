@@ -4,6 +4,7 @@ TestDiscoveryAgent - Automatically discovers and runs test suites (pytest/unitte
 
 import sys
 import json
+import ast
 import logging
 import datetime
 import subprocess
@@ -46,10 +47,9 @@ def test_runner_agent(state: AgentState) -> Dict[str, Any]:
     test_output = ""
     passed = False
 
-    # Check if we have test files
+    # Check if we have dedicated test files
     if test_files:
         logger.info(f"Executing pytest on {len(test_files)} test files...")
-        # Run pytest
         res = _run_cmd(["pytest", "--tb=short", "-v"], cwd=clone_path, timeout=90)
         test_output = (res.stdout or "") + "\n" + (res.stderr or "")
 
@@ -61,8 +61,8 @@ def test_runner_agent(state: AgentState) -> Dict[str, Any]:
 
         passed = (res.returncode == 0) and ("FAILED" not in test_output) and ("ERROR:" not in test_output)
     else:
-        # If no dedicated test files, run py_compile & syntax check across all source files
-        logger.info("No test files detected; verifying syntax across source files...")
+        # If no dedicated test files, run py_compile and static AST validation across all source files
+        logger.info("No test files detected; verifying syntax and static compliance across source files...")
         syntax_errors = []
         for src_file in state.get("source_files", []):
             full_path = clone_path / src_file
@@ -71,8 +71,52 @@ def test_runner_agent(state: AgentState) -> Dict[str, Any]:
                 syntax_errors.append(f"{src_file}: {res.stderr or res.stdout}")
 
         if not syntax_errors:
-            passed = True
-            test_output = "All Python files compiled successfully without syntax errors."
+            # Also verify if any static linting or zero-division errors remain
+            ast_issues = []
+            for src_file in state.get("source_files", []):
+                full_path = clone_path / src_file
+                if not full_path.exists():
+                    continue
+                try:
+                    with open(full_path, "r", encoding="utf-8", errors="replace") as f:
+                        code = f.read()
+                    tree = ast.parse(code, filename=str(full_path))
+                    # Check unused imports
+                    imports = {}
+                    for node in ast.walk(tree):
+                        if isinstance(node, ast.Import):
+                            for alias in node.names:
+                                imports[alias.asname or alias.name.split('.')[0]] = node.lineno
+                        elif isinstance(node, ast.ImportFrom):
+                            for alias in node.names:
+                                if alias.name != '*':
+                                    imports[alias.asname or alias.name] = node.lineno
+                    used = set()
+                    for node in ast.walk(tree):
+                        if isinstance(node, (ast.Import, ast.ImportFrom)):
+                            continue
+                        if isinstance(node, ast.Name):
+                            used.add(node.id)
+                        elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+                            used.add(node.value.id)
+                    for imp_name, lno in imports.items():
+                        if imp_name not in used:
+                            ast_issues.append(f"{src_file}:{lno} Unused import '{imp_name}' (LINTING)")
+
+                    # Check literal zero division
+                    for node in ast.walk(tree):
+                        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)):
+                            if isinstance(node.right, ast.Constant) and node.right.value == 0:
+                                ast_issues.append(f"{src_file}:{node.lineno} Zero division (LOGIC)")
+                except Exception:
+                    pass
+
+            if not ast_issues:
+                passed = True
+                test_output = "All Python files compiled successfully without syntax, linting, or logic errors."
+            else:
+                passed = False
+                test_output = "Static verification detected remaining issues:\n" + "\n".join(ast_issues)
         else:
             passed = False
             test_output = "\n".join(syntax_errors)

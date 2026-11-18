@@ -27,7 +27,6 @@ def repair_unused_import(file_path: Path, line_no: int, error_msg: str) -> bool:
 
         if 1 <= line_no <= len(lines):
             target_line = lines[line_no - 1]
-            # Match identifier from message if available
             m = re.search(r"'(?P<name>\w+)'", error_msg)
             ident = m.group("name") if m else None
 
@@ -38,7 +37,7 @@ def repair_unused_import(file_path: Path, line_no: int, error_msg: str) -> bool:
                 # If from x import a, b where only b is unused
                 cleaned = re.sub(rf'\b{ident}\b\s*,?\s*', '', target_line)
                 cleaned = re.sub(r',\s*$', '', cleaned.strip()) + '\n'
-                if cleaned.strip().endswith('import'):
+                if cleaned.strip().endswith('import') or cleaned.strip() == '':
                     del lines[line_no - 1]
                 else:
                     lines[line_no - 1] = cleaned
@@ -52,16 +51,14 @@ def repair_unused_import(file_path: Path, line_no: int, error_msg: str) -> bool:
 
 
 def repair_missing_colon(file_path: Path, line_no: int) -> bool:
-    """Deterministically add missing colon to header statement."""
+    """Deterministically add missing colon to header statement (def, class, if, for, while, etc.)."""
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
 
         if 1 <= line_no <= len(lines):
             line = lines[line_no - 1].rstrip("\r\n")
-            # If line does not end with colon, append it
             if not line.strip().endswith(":"):
-                # Handle possible trailing comment
                 if "#" in line:
                     code_part, comment_part = line.split("#", 1)
                     lines[line_no - 1] = f"{code_part.rstrip()}:  #{comment_part}\n"
@@ -76,6 +73,49 @@ def repair_missing_colon(file_path: Path, line_no: int) -> bool:
     return False
 
 
+def repair_assignment_in_condition(file_path: Path, line_no: int) -> bool:
+    """Deterministically replace assignment '=' with equality '==' in conditional statements."""
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+        if 1 <= line_no <= len(lines):
+            line = lines[line_no - 1]
+            # Match condition headers e.g. if item["stock"] = 0: or while x = 1:
+            if re.search(r'^\s*(?:if|elif|while)\b', line):
+                # Replace single '=' not preceded or followed by =, !, <, >
+                repaired = re.sub(r'(?<![=!<>])=(?![=>])', '==', line)
+                if repaired != line:
+                    lines[line_no - 1] = repaired
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        f.writelines(lines)
+                    logger.info(f"Repaired assignment in condition {file_path}:{line_no}: {repaired.strip()}")
+                    return True
+    except Exception as e:
+        logger.error(f"Failed to repair assignment in condition {file_path}:{line_no}: {e}")
+    return False
+
+
+def repair_zero_division(file_path: Path, line_no: int) -> bool:
+    """Deterministically replace division by literal zero with safe division."""
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+        if 1 <= line_no <= len(lines):
+            line = lines[line_no - 1]
+            repaired = re.sub(r'(?<=[/%])\s*0(?![0-9.])', ' 1', line)
+            if repaired != line:
+                lines[line_no - 1] = repaired
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.writelines(lines)
+                logger.info(f"Repaired zero division in {file_path}:{line_no}: {repaired.strip()}")
+                return True
+    except Exception as e:
+        logger.error(f"Failed to repair zero division in {file_path}:{line_no}: {e}")
+    return False
+
+
 def repair_indentation(file_path: Path, line_no: int) -> bool:
     """Deterministically fix indentation to standard 4-space indent."""
     try:
@@ -84,9 +124,7 @@ def repair_indentation(file_path: Path, line_no: int) -> bool:
 
         if 1 <= line_no <= len(lines):
             target = lines[line_no - 1]
-            # Replace tabs with 4 spaces and strip unexpected indent
             stripped = target.lstrip()
-            # Calculate standard indent (use 4 spaces as default block indent)
             lines[line_no - 1] = f"    {stripped}"
             with open(file_path, "w", encoding="utf-8") as f:
                 f.writelines(lines)
@@ -104,7 +142,7 @@ def call_llm_fixer(
     openai_key: str = "",
     gemini_key: str = ""
 ) -> bool:
-    """Apply LLM patch using modern OpenAI v1.0+ or Google Gemini."""
+    """Apply LLM patch using modern Google Gemini or OpenAI v1.0+."""
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
@@ -123,29 +161,37 @@ def call_llm_fixer(
         replacement = None
 
         # 1. Try Google Gemini if key available
-        if gemini_key or os.environ.get("GEMINI_API_KEY"):
-            try:
-                import google.generativeai as genai
-                genai.configure(api_key=gemini_key or os.environ.get("GEMINI_API_KEY"))
-                model = genai.GenerativeModel("gemini-1.5-flash")
-                resp = model.generate_content(prompt)
-                if resp and resp.text:
-                    replacement = resp.text.strip().replace("```python", "").replace("```", "").strip()
-            except Exception as e:
-                logger.warning(f"Gemini fix attempt failed: {e}")
+        active_gemini = gemini_key or os.environ.get("GEMINI_API_KEY", "").strip()
+        if active_gemini:
+            for model_name in ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]:
+                try:
+                    import google.generativeai as genai
+                    genai.configure(api_key=active_gemini)
+                    model = genai.GenerativeModel(model_name)
+                    resp = model.generate_content(prompt)
+                    if resp and resp.text:
+                        candidate = resp.text.strip().replace("```python", "").replace("```", "").strip()
+                        if candidate:
+                            replacement = candidate
+                            break
+                except Exception as e:
+                    logger.warning(f"Gemini model {model_name} fix attempt failed: {e}")
 
         # 2. Try OpenAI v1.0+ if key available
-        if not replacement and (openai_key or os.environ.get("OPENAI_API_KEY")):
+        active_openai = openai_key or os.environ.get("OPENAI_API_KEY", "").strip()
+        if not replacement and active_openai:
             try:
                 from openai import OpenAI
-                client = OpenAI(api_key=openai_key or os.environ.get("OPENAI_API_KEY"))
+                client = OpenAI(api_key=active_openai)
                 resp = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=100,
                     temperature=0.1
                 )
-                replacement = resp.choices[0].message.content.strip().replace("```python", "").replace("```", "").strip()
+                candidate = resp.choices[0].message.content.strip().replace("```python", "").replace("```", "").strip()
+                if candidate:
+                    replacement = candidate
             except Exception as e:
                 logger.warning(f"OpenAI fix attempt failed: {e}")
 
@@ -166,10 +212,16 @@ def code_repair_agent(state: AgentState) -> Dict[str, Any]:
     logger.info("--- [CodeRepairAgent] Executing code repairs ---")
 
     clone_path = Path(state["clone_path"])
-    # Sort errors descending by line number so earlier line numbers do not shift when lines are deleted/modified
     raw_errors = state.get("detected_errors", [])
+    # Sort errors descending by line number so edits do not offset earlier lines in same file
     errors = sorted(raw_errors, key=lambda e: (e.get('file', ''), -e.get('line', 0)))
-    fixes_applied = list(state.get("fixes_applied", []))
+
+    # Use map keyed by (file, line_number, bug_type) to prevent duplicate rows across iterations
+    fixes_map: Dict[str, Dict[str, Any]] = {}
+    for existing in state.get("fixes_applied", []):
+        key = f"{existing.get('file')}:{existing.get('line_number')}:{existing.get('bug_type')}"
+        fixes_map[key] = existing
+
     openai_key = state.get("openai_key") or os.environ.get("OPENAI_API_KEY", "")
     gemini_key = state.get("gemini_key") or os.environ.get("GEMINI_API_KEY", "")
     iteration = state.get("current_iteration", 1)
@@ -187,16 +239,31 @@ def code_repair_agent(state: AgentState) -> Dict[str, Any]:
         msg = err["message"]
         fix_action = err["fix_action"]
         expected_str = err["expected_dashboard_output"]
+        key = f"{rel_file}:{line_no}:{btype}"
+
+        # If already successfully fixed in a previous iteration, skip
+        if key in fixes_map and fixes_map[key].get("status") == "Fixed":
+            continue
 
         success = False
 
-        # Attempt deterministic repair
+        # Attempt deterministic repair based on bug type and action
         if btype == "LINTING" and "import" in fix_action.lower():
             success = repair_unused_import(full_path, line_no, msg)
-        elif btype == "SYNTAX" and "colon" in fix_action.lower():
-            success = repair_missing_colon(full_path, line_no)
+        elif btype == "SYNTAX":
+            if "assignment" in fix_action.lower() or "cannot assign" in msg.lower() or "==" in fix_action:
+                success = repair_assignment_in_condition(full_path, line_no)
+            if not success and ("colon" in fix_action.lower() or "colon" in msg.lower()):
+                success = repair_missing_colon(full_path, line_no)
+            if not success:
+                # Try assignment in condition first for general syntax errors
+                success = repair_assignment_in_condition(full_path, line_no)
+            if not success:
+                success = repair_missing_colon(full_path, line_no)
         elif btype == "INDENTATION":
             success = repair_indentation(full_path, line_no)
+        elif btype == "LOGIC" and ("zero" in fix_action.lower() or "zerodivision" in msg.lower()):
+            success = repair_zero_division(full_path, line_no)
 
         # Fallback to LLM if deterministic fix not applicable or failed
         if not success and (openai_key or gemini_key):
@@ -205,7 +272,7 @@ def code_repair_agent(state: AgentState) -> Dict[str, Any]:
         status_flag = "Fixed" if success else "Failed"
         commit_msg = f"[AI-AGENT] Fix {btype} error in {rel_file} line {line_no}"
 
-        fixes_applied.append({
+        fixes_map[key] = {
             "file": rel_file,
             "bug_type": btype,
             "line_number": line_no,
@@ -213,7 +280,7 @@ def code_repair_agent(state: AgentState) -> Dict[str, Any]:
             "status": status_flag,
             "fix": fix_action,
             "expected_dashboard_output": expected_str
-        })
+        }
         if success:
             new_fixes_count += 1
 
@@ -229,5 +296,5 @@ def code_repair_agent(state: AgentState) -> Dict[str, Any]:
         logger.info("No modifications detected to commit in this iteration.")
 
     return {
-        "fixes_applied": fixes_applied
+        "fixes_applied": list(fixes_map.values())
     }

@@ -37,6 +37,8 @@ def _get_heuristic_fix_action(msg: str, bug_type: str) -> str:
         return "remove the import statement"
     if "missing colon" in m or ("syntaxerror" in m and "colon" in m):
         return "add the colon at the correct position"
+    if "cannot assign" in m or "assignment" in m or "==" in m:
+        return "replace assignment = with comparison =="
     if "indentationerror" in m or "unexpected indent" in m:
         return "fix indentation to use consistent 4 spaces"
     if "typeerror" in m or "cannot concatenate" in m or "unsupported operand" in m:
@@ -62,8 +64,8 @@ def failure_classifier_agent(state: AgentState) -> Dict[str, Any]:
 
     def add_issue(rel_file: str, line: int, msg: str, btype: str, fix_action: str = None):
         rel_clean = rel_file.replace("\\", "/")
-        # Avoid duplicate (file, line)
-        if any(d["file"] == rel_clean and d["line"] == line for d in detected):
+        # Avoid duplicate (file, line, btype)
+        if any(d["file"] == rel_clean and d["line"] == line and d["bug_type"] == btype for d in detected):
             return
         if not fix_action:
             fix_action = _get_heuristic_fix_action(msg, btype)
@@ -85,7 +87,7 @@ def failure_classifier_agent(state: AgentState) -> Dict[str, Any]:
             fpath, lno, err = m.group(1), int(m.group(2)), m.group(3)
             if str(clone_path) in fpath:
                 fpath = fpath.replace(str(clone_path) + "/", "").replace(str(clone_path) + "\\", "")
-            
+
             btype = "LOGIC"
             if "IndentationError" in err or "TabError" in err:
                 btype = "INDENTATION"
@@ -95,7 +97,9 @@ def failure_classifier_agent(state: AgentState) -> Dict[str, Any]:
                 btype = "IMPORT"
             elif "TypeError" in err:
                 btype = "TYPE_ERROR"
-            
+            elif "ZeroDivisionError" in err:
+                btype = "LOGIC"
+
             add_issue(fpath, lno, err, btype)
 
     # 2. Tokenize & Compile Scan across Python files (Catches INDENTATION & SYNTAX)
@@ -109,6 +113,8 @@ def failure_classifier_agent(state: AgentState) -> Dict[str, Any]:
         except OSError:
             continue
 
+        file_lines = content.splitlines()
+
         # Pass A: Tokenize for INDENTATION
         try:
             list(tokenize.generate_tokens(io.StringIO(content).readline))
@@ -117,15 +123,25 @@ def failure_classifier_agent(state: AgentState) -> Dict[str, Any]:
         except tokenize.TokenError:
             pass
 
-        # Pass B: Compile for SYNTAX / missing colons
+        # Pass B: Compile for SYNTAX / missing colons / assignment in condition
         try:
             compile(content, str(full_p), "exec")
         except IndentationError as ie:
             add_issue(rel_f, ie.lineno or 1, f"IndentationError: {ie.msg}", "INDENTATION", "fix indentation to use consistent 4 spaces")
         except SyntaxError as se:
             msg = se.msg or "invalid syntax"
-            action = "add the colon at the correct position" if "colon" in msg.lower() or (se.text and not se.text.strip().endswith(":")) else "correct the syntax error"
-            add_issue(rel_f, se.lineno or 1, f"SyntaxError: {msg}", "SYNTAX", action)
+            lno = se.lineno or 1
+            target_line = se.text or ""
+            if not target_line and 1 <= lno <= len(file_lines):
+                target_line = file_lines[lno - 1]
+
+            if re.search(r'^\s*(?:if|elif|while)\b', target_line) and re.search(r'(?<![=!<>])=(?![=>])', target_line):
+                action = "replace assignment = with comparison =="
+            elif "colon" in msg.lower() or (target_line and not target_line.strip().endswith(":") and re.search(r'^\s*(?:def|class|if|elif|else|for|while|try|except|finally|with)\b', target_line)):
+                action = "add the colon at the correct position"
+            else:
+                action = "correct the syntax error"
+            add_issue(rel_f, lno, f"SyntaxError: {msg}", "SYNTAX", action)
 
         # Pass C: AST-level Unused Import Detection (Strictly LINTING as required by test cases)
         try:
